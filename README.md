@@ -508,6 +508,175 @@ const updateMutation = useMutation({
 - ![img_31.png](img_31.png)
 
 ## Infinite Scroll - Infinite Queries for Loading Data (Just in Time)
+- ![img_32.png](img_32.png)
+- We will use a new hook useInfiniteQuery
+- ![img_33.png](img_33.png)
+- ![img_34.png](img_34.png)
+
+```jsx
+import "./App.css";
+import { InfinitePeople } from "./people/InfinitePeople";
+import { InfiniteSpecies } from "./species/InfiniteSpecies";
+import {QueryClient,QueryClientProvider} from "@tanstack/react-query";
+import {ReactQueryDevtools} from "@tanstack/react-query-devtools";
+
+function App() {
+  return (
+      <QueryClientProvider client={queryClient}>
+    <div className="App">
+      <h1>Infinite SWAPI</h1>
+      <InfinitePeople />
+      {/* <InfiniteSpecies /> */}
+    </div>
+          <ReactQueryDevtools />
+      </QueryClientProvider>
+  );
+}
+
+export default App;
+
+```
+### useInfiniteQuery
+- ![img_35.png](img_35.png)
+- ![img_36.png](img_36.png)
+- ![img_37.png](img_37.png)
+- ![img_38.png](img_38.png)
+- ![img_39.png](img_39.png)
+- Initial when the component mounts and we fetch the first page, the data is undefined
+- Then we fetch the first page
+- ![img_40.png](img_40.png)
+- It sets the first property of the data.pages object
+- After we get the data back, React Query will run the getNextPageParam
+- ![img_41.png](img_41.png)
+- Then we check if there is a next Page
+- ![img_42.png](img_42.png)
+- Then we run the getNextPageParam
+- If getNextPageParam is undefined, it means there are no more pages
+- So hasNextPage is false and we are done
+- ![img_43.png](img_43.png)
+- Initial code for useInfiniteQuery is as follows:
+```jsx
+import InfiniteScroll from "react-infinite-scroller";
+import { Person } from "./Person";
+import {useInfiniteQuery} from "@tanstack/react-query"
+
+const initialUrl = "https://swapi-node.now.sh/api/people";
+const fetchUrl = async (url) => {
+  const response = await fetch(url);
+  return response.json();
+};
+
+export function InfinitePeople() {
+
+    //fetch Next page is called when we want to load more data
+  const {data, fetchNextPage, hasNextPage} = useInfiniteQuery({
+    queryKey:["sw-people"],
+    queryFn: ({pageParam = initialUrl}) => fetchUrl(pageParam),
+    getNextPageParam: (lastPage) =>{
+      return lastPage.next || undefined;
+    }
+  })
+```
+### React Infinite Scroller
+- ![img_45.png](img_45.png)
+- Code will be as follows:
+```jsx
+import InfiniteScroll from "react-infinite-scroller";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { Person } from "./Person";
+
+const baseUrl = "https://swapi-node.vercel.app";
+const initialUrl = baseUrl + "/api/people/";
+const fetchUrl = async (url) => {
+  const response = await fetch(url);
+  return response.json();
+};
+
+export function InfinitePeople() {
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetching,
+    isLoading,
+    isError,
+    error,
+  } = useInfiniteQuery({
+    queryKey: ["sw-people"],
+    queryFn: ({ pageParam = initialUrl }) => fetchUrl(pageParam),
+    getNextPageParam: (lastPage) => {
+      return lastPage.next ? baseUrl + lastPage.next : undefined;
+    },
+  });
+
+  if (isLoading) {
+    return <div className="loading">Loading...</div>;
+  }
+
+  if (isError) {
+    return <div>Error! {error.toString()}</div>;
+  }
+
+  return (
+      <>
+        {isFetching && <div className="loading">Loading...</div>}
+        <InfiniteScroll
+            loadMore={() => {
+              if (!isFetching) {
+                fetchNextPage();
+              }
+            }}
+            hasMore={hasNextPage}
+        >
+          {data.pages.map((pageData) => {
+            return pageData.results.map((person) => {
+              return (
+                  <Person
+                      key={person.fields.name}
+                      name={person.fields.name}
+                      hairColor={person.fields.hair_color}
+                      eyeColor={person.fields.eye_color}
+                  />
+              );
+            });
+          })}
+        </InfiniteScroll>
+      </>
+  );
+}
+```
+- We can write similar code for InfiniteSpecies
+
+### Bi-directional Scrolling
+- ![img_46.png](img_46.png)
+- getPreviousPageParam
+- ![img_47.png](img_47.png)
+
+## React Query in a larger app
+- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
