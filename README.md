@@ -653,7 +653,204 @@ export function InfinitePeople() {
 - ![img_47.png](img_47.png)
 
 ## React Query in a larger app
-- 
+- We will try to centralize error logging
+- We will use custom hooks for useQuery rather than use useQuery directly in the components
+- ![img_48.png](img_48.png)
+- ![img_49.png](img_49.png)
+- We can lazy load the react-query-devtools in the development also
+- We can call windows.toggleDevtools() to enable devTools in production
+- We will install eslint plugin for react-query
+- To install anything as a dev dependencies we will add the -D switch along the command
+```shell
+npm i -D @tanstack/eslint-plugin-query
+```
+- We can set up aliases to our folders in the tsconfig.json file
+- ![img_50.png](img_50.png)
+
+### Setting up React Query in App.tsx for client
+- Include the following code in App.tsx to install React Query Client, Query Client Provider and ReactQueryDevTools
+- Please note that rather than defining an instance of queryClient we define it inside a queryClient.ts file
+- This allows us to import the instance whenever we need it
+- Then make the following changes in App.tsx
+```jsx
+import {queryClient} from "@/react-query/queryClient";
+import {QueryClientProvider} from "@tanstack/react-query";
+import {ReactQueryDevtools} from "@tanstack/react-query-devtools";
+
+<QueryClientProvider client={queryClient}>
+    <AuthContextProvider>
+        <Loading />
+        <BrowserRouter>
+            <Navbar />
+            <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/Staff" element={<AllStaff />} />
+                <Route path="/Calendar" element={<Calendar />} />
+                <Route path="/Treatments" element={<Treatments />} />
+                <Route path="/signin" element={<Signin />} />
+                <Route path="/user/:id" element={<UserProfile />} />
+            </Routes>
+        </BrowserRouter>
+        <ToastContainer />
+    </AuthContextProvider>
+    <ReactQueryDevtools></ReactQueryDevtools>
+</QueryClientProvider>
+```
+### Custom Query Hook: useTreatments
+- In larger apps, we make custom hooks for each type of data
+- This makes it accessible from multiple components
+- This also eliminates the risk of mixing up keys
+- It also encapsulates the queryFn in a custom hook
+- Also, it abstracts the implementation from the Presentation Layer
+- We can update the implementation without affecting other components
+- Code for useTreatments is as follows:
+```jsx
+import type { Treatment } from "@shared/types";
+import {useQuery} from "@tanstack/react-query";
+import { axiosInstance } from "@/axiosInstance";
+import { queryKeys } from "@/react-query/constants";
+
+// for when we need a query function for useQuery
+async function getTreatments(): Promise<Treatment[]> {
+  const { data } = await axiosInstance.get('/treatments');
+  return data;
+}
+
+export function useTreatments(): Treatment[] {
+    //specify a default value
+  const fallback : Treatment[] = []
+    //initialize data to be default value
+  const {data = fallback} = useQuery({
+   queryKey: [queryKeys.treatments],
+   queryFn: getTreatments,
+ })
+  return data;
+}
+
+```
+
+### Centralized Fetching Indicator (useInFetching)
+- ![img_51.png](img_51.png)
+- We will modify the Loading.tsx as follows
+```jsx
+import { Spinner, Text } from "@chakra-ui/react";
+import {useIsFetching} from "@tanstack/react-query";
+
+export function Loading() {
+  // will use React Query `useIsFetching` to determine whether or not to display
+  const isFetching = useIsFetching(); // returns an integer, if > 0, then query calls are still pending, if 0, then it will give false
+  const display = isFetching ? "inherit" : "none";
+
+  return (
+    <Spinner
+      thickness="4px"
+      speed="0.65s"
+      emptyColor="olive.200"
+      color="olive.800"
+      role="status"
+      position="fixed"
+      zIndex="9999"
+      top="50%"
+      left="50%"
+      transform="translate(-50%, -50%)"
+      display={display}
+    >
+      <Text display="none">Loading...</Text>
+    </Spinner>
+  );
+}
+
+```
+
+### Global Callback to show a toast message everytime there is an error
+- ![img_52.png](img_52.png)
+- We will setup the error handler as follows:
+```jsx
+import { toast } from "@/components/app/toast";
+import {QueryCache, QueryClient} from "@tanstack/react-query";
+
+function errorHandler(errorMsg: string) {
+  // https://chakra-ui.com/docs/components/toast#preventing-duplicate-toast
+  // one message per page load, not one message per query
+  // the user doesn't care that there were three failed queries on the staff page
+  //    (staff, treatments, user)
+  const id = "react-query-toast";
+
+  if (!toast.isActive(id)) {
+    const action = "fetch";
+    const title = `could not ${action} data: ${
+      errorMsg ?? "error connecting to server"
+    }`;
+    toast({ id, title, status: "error", variant: "subtle", isClosable: true });
+  }
+}
+
+
+export const queryClient = new QueryClient({
+    queryCache: new QueryCache({
+        onError: (error) => {
+            errorHandler(error.message);
+        },
+    })
+});
+
+```
+- It displays the error like this
+- ![img_53.png](img_53.png)
+- Default retries for react query is 3
+
+### Writing a custom hook for Staff Data
+- ![img_54.png](img_54.png)
+- Code for useStaff is as follows
+```jsx
+import { useState } from "react";
+
+import type { Staff } from "@shared/types";
+
+import { filterByTreatment } from "../utils";
+
+import { axiosInstance } from "@/axiosInstance";
+import { queryKeys } from "@/react-query/constants";
+import {useQuery} from "@tanstack/react-query";
+
+//query function for useQuery
+async function getStaff(): Promise<Staff[]> {
+  const { data } = await axiosInstance.get('/staff');
+  return data;
+}
+interface UseStaffReturn {
+  staff: Staff[];
+  filter: string;
+  setFilter: (filter: string) => void;
+}
+
+export function useStaff() {
+  // for filtering staff by treatment
+  const [filter, setFilter] = useState("all");
+
+  //fallback data
+  const fallback: Staff[] = [];
+  // TODO: get data from server via useQuery
+  const {data:staff = fallback} = useQuery({
+    queryKey: [queryKeys.staff],
+    queryFn: getStaff,
+  });
+  return { staff, filter, setFilter };
+}
+
+```
+
+### Summary
+- Create a separate file for the Query Client
+- Create custom hooks to create code modular and reusable
+- We centralized the loading component using the useInFetching() hook for react-query
+- We centralized the error handling using the onError callback inside the Query Client Cache
+
+### Query Features: Pre-fetching and Pagination
+
+
+
+
 
 
 
