@@ -847,7 +847,302 @@ export function useStaff() {
 - We centralized the error handling using the onError callback inside the Query Client Cache
 
 ### Query Features: Pre-fetching and Pagination
+- We want to pre-populate data if we know what we want user to see
+- ![img_55.png](img_55.png)
+- In Prefetching data, we prefetch the next page's data while the user is being displayed the current page.
+- ![img_56.png](img_56.png)
+- prefetchQuery is a method of the query client
+- It is added to the client cache
+- We make use of the useQueryClient hook which returns the queryClient within the Provider
+- We will make a usePrefetchTreatments hook within the useTreatments.ts file.
+- It uses the same queryFn and key as the useTreatments call
+- We will call usePrefetchTreatments() from the Home component
+- Idea is to add data to the cache in the background
+- Data fetched using the prefetchQuery can be stale also when the user actually loads the page that uses that data
+- We can always run useQuery() to get the latest data, but atleast we have something to show to the user
+- But it must be within gcTime
+- ![img_57.png](img_57.png)
+```jsx
+export function usePrefetchTreatments(): void {
+    //Get the queryClient instance passed to the QueryProvider
+    const queryClient = useQueryClient();
+    queryClient.prefetchQuery({
+        queryKey:[queryKeys.treatments],
+        queryFn: getTreatments,
+    });
+}
+```
+- We can then call it inside Home.tsx component
+```jsx
+import {usePrefetchTreatments} from "@/components/treatments/hooks/useTreatments";
 
+import { BackgroundImage } from "@/components/common/BackgroundImage";
+
+export function Home() {
+    usePrefetchTreatments();
+  return (
+    <Stack textAlign="center" justify="center" height="84vh">
+      <BackgroundImage />
+      <Text textAlign="center" fontFamily="Forum, sans-serif" fontSize="6em">
+        <Icon m={4} verticalAlign="top" as={GiFlowerPot} />
+        Lazy Days Spa
+      </Text>
+      <Text>Hours: limited</Text>
+      <Text>Address: nearby</Text>
+    </Stack>
+  );
+}
+```
+- But would we want to call this usePrefetchTreatments() hook on every render of Home screen
+- Ideally no, but cant we run it inside a useEffect() hook
+- We cannot, since we cannot call other hooks inside other hooks
+- Cant we just make it any other function
+- No, since usePrefetchTreatments() uses the useQueryClient hook internally
+- So it has to be a hook
+- Notice that the treatments data is loaded in the queryClient on the first render of the Homepage
+- ![img_58.png](img_58.png)
+
+### useAppointment Custom hook
+- We can have the following code to get the list of appointments:
+```jsx
+// Notes:
+//    1. appointments is an AppointmentDateMap (object with days of month
+//       as properties, and arrays of appointments for that day as values)
+//
+//    2. The getAppointments query function needs monthYear.year and
+//       monthYear.month
+const fallback: AppointmentDateMap = {};
+
+const {data: appointments = fallback} = useQuery({
+    queryKey: [queryKeys.appointments],
+    queryFn: ()=> getAppointments(monthYear.year, monthYear.month),
+})
+/** ****************** END 3: useQuery  ******************************* */
+
+return { appointments, monthYear, updateMonthYear, showAll, setShowAll };
+}
+```
+- But there is a problem, each time we move to a different month, we see the same data
+- This is because we are using the same queryKey above
+- This is not loading new data
+- We are not triggering the refetch of data
+- Data is refetched in the following scenarios:(only for a known key)
+- When a component remounts
+- When the window is refocussed
+- When we trigger the refetch manually
+- Or an automated refetch after a certain period of time
+- One solution is to have a new key for each month
+- We want to treat keys are dependency arrays
+- We will change the code as follows:
+```jsx
+ const fallback: AppointmentDateMap = {};
+
+const {data: appointments = fallback} = useQuery({
+    queryKey: [queryKeys.appointments,monthYear.year, monthYear.month],
+    queryFn: ()=> getAppointments(monthYear.year, monthYear.month),
+})
+/** ****************** END 3: useQuery  ******************************* */
+
+return { appointments, monthYear, updateMonthYear, showAll, setShowAll };
+}
+```
+- Now the queryKeys have the month and year appended to it
+- ![img_59.png](img_59.png)
+
+### Prefetching for appointments pagination
+- Remember setting state is an asynchronous operation in React
+- ![img_60.png](img_60.png)
+- We will use prefetchQuery as follows:
+```jsx
+const queryClient = useQueryClient();
+useEffect(() => {
+    const nextMonthYear = getNewMonthYear(monthYear,1);
+    queryClient.prefetchQuery({
+        queryKey:[queryKeys.appointments,nextMonthYear.year,nextMonthYear.month],
+        queryFn: () => getAppointments(nextMonthYear.year,nextMonthYear.month),
+    })
+},[queryClient,monthYear]);
+```
+- ![img_61.png](img_61.png)
+- Note that even though we are in August, we have prefetched the data for the next month
+
+### Summary
+- ![img_62.png](img_62.png)
+
+## Query Features: Transforming and Re-fetching data
+- We will use select option to transform/filter data
+- Similar to Project<> option in Entity Framework Core
+- ![img_64.png](img_64.png)
+```jsx
+const transformTodoNames = (data: Todos) =>
+  data.map((todo) => todo.name.toUpperCase())
+
+export const useTodosQuery = () =>
+  useQuery({
+    queryKey: ['todos'],
+    queryFn: fetchTodos,
+    // ✅ uses a stable function reference
+    select: transformTodoNames,
+  })
+
+export const useTodosQuery = () =>
+  useQuery({
+    queryKey: ['todos'],
+    queryFn: fetchTodos,
+    // ✅ memoizes with useCallback
+    select: React.useCallback(
+      (data: Todos) => data.map((todo) => todo.name.toUpperCase()),
+      []
+    ),
+  })
+```
+- This is the changes we need to make in useAppointments hook
+```jsx
+const {data: appointments = fallback} = useQuery({
+    queryKey: [queryKeys.appointments,monthYear.year, monthYear.month],
+    queryFn: ()=> getAppointments(monthYear.year, monthYear.month),
+    //Apply transformation to the result returned from queryFn
+    select: (data)=>selectFn(data,showAll),
+})
+
+// Not referentially stable, It is going to get redefined every time the hook gets run
+//Need to make use of useCallback hook
+//useCallback is a memoizer for functions
+const selectFn = useCallback((data:AppointmentDateMap, showAll:boolean) =>{
+        if(showAll) return data;
+        return getAvailableAppointments(data,userId);
+    },
+    [userId]);
+```
+- ![img_65.png](img_65.png)
+- Solution is as follows:
+```tsx
+export function useStaff() {
+    // for filtering staff by treatment
+    const [filter, setFilter] = useState("all");
+
+    const selectFn = useCallback((unfilteredStaff: Staff[]) => {
+        if (filter === 'all') return unfilteredStaff;
+        return filterByTreatment(unfilteredStaff, filter); // ✅ Return filtered data directly
+    }, [filter]);
+
+    //fallback data
+    const fallback: Staff[] = [];
+    // TODO: get data from server via useQuery
+    const {data:staff = fallback} = useQuery({
+        queryKey: [queryKeys.staff],
+        queryFn: getStaff,
+        //Apply transformation to the result returned from queryFn
+        select: selectFn,
+    });
+    return { staff, filter, setFilter };
+}
+```
+### Intro to Re-fetch
+- Re-fetch ensures stale data gets updated from the server
+- ![img_66.png](img_66.png)
+- Re-fetching can be configured globally or on a specific query options
+- ![img_67.png](img_67.png)
+- We can suppress re-fetch also
+- ![img_68.png](img_68.png)
+
+### Re-fetch options
+- We can only configure re-fetch options for useQuery and not prefetchQuery
+- Here we are manually disabling re-fetching for a particular query
+```jsx
+export function useTreatments(): Treatment[] {
+    const fallback : Treatment[] = []
+    const {data = fallback} = useQuery({
+        queryKey: [queryKeys.treatments],
+        queryFn: getTreatments,
+        staleTime:600000, //10 minutes
+        gcTime: 900000, //15 minutes
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+    });
+    return data;
+}
+
+```
+### Global refetch options
+- The above options for re-fetching were specific to a query
+- What if we want to apply these re-fetching settings globally?
+- ![img_69.png](img_69.png)
+- We will change these settings in the query-client.ts file where we create an instance of query client to be used throughout the application
+```jsx
+export const queryClient = new QueryClient({
+    //Configure refetch options globally here
+    defaultOptions:{
+        queries:{
+            staleTime:600000, //10 minutes
+            gcTime: 900000, //15 minutes
+            refetchOnMount: false,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+        }
+    },
+
+    //Add the query cache for the global error handler
+    queryCache: new QueryCache({
+        onError: (error) => {
+            errorHandler(error.message);
+        },
+    })
+});
+```
+
+### Overwriting Re-fetch Defaults and Polling
+- Go to useAppointments and add the following code:
+```jsx
+const commonOptions = {
+  staleTime: 0, //0 minutes
+  gcTime: 30000, //5 minutes
+};
+
+// useQuery call for appointments for the current monthYear
+const queryClient = useQueryClient();
+useEffect(() => {
+    const nextMonthYear = getNewMonthYear(monthYear,1);
+    queryClient.prefetchQuery({
+        queryKey:[queryKeys.appointments,nextMonthYear.year,nextMonthYear.month],
+        queryFn: () => getAppointments(nextMonthYear.year,nextMonthYear.month),
+        ...commonOptions
+    })
+},[queryClient,monthYear]);
+
+const {data: appointments = fallback} = useQuery({
+    queryKey: [queryKeys.appointments,monthYear.year, monthYear.month],
+    queryFn: ()=> getAppointments(monthYear.year, monthYear.month),
+    //Apply transformation to the result returned from queryFn
+    select: (data)=>selectFn(data,showAll),
+    ...commonOptions,
+    refetchOnWindowFocus:true
+})
+```
+
+### Polling server and refresh data on a regular basis
+- Appointments is the opposite of treatments and staff
+- We want it to be updated even if user doesnot take action
+- We overrode the defaults for Appointments earlier
+- ![img_70.png](img_70.png)
+- We just need to set the refetchInterval option in useQuery
+```jsx
+const {data: appointments = fallback} = useQuery({
+    queryKey: [queryKeys.appointments,monthYear.year, monthYear.month],
+    queryFn: ()=> getAppointments(monthYear.year, monthYear.month),
+    //Apply transformation to the result returned from queryFn
+    select: (data)=>selectFn(data,showAll),
+    ...commonOptions,
+    refetchOnWindowFocus:true,
+    refetchInterval: 60000, //every minute
+})
+```
+
+### Summary
+- ![img_71.png](img_71.png)
+
+## React Query and Authentication
 
 
 

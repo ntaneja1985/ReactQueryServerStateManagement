@@ -19,6 +19,18 @@ function errorHandler(errorMsg: string) {
 
 
 export const queryClient = new QueryClient({
+    //Configure refetch options globally here
+    defaultOptions:{
+        queries:{
+            staleTime:600000, //10 minutes
+            gcTime: 900000, //15 minutes
+            refetchOnMount: false,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+        }
+    },
+
+    //Add the query cache for the global error handler
     queryCache: new QueryCache({
         onError: (error) => {
             errorHandler(error.message);

@@ -1,9 +1,11 @@
 import { Icon, Stack, Text } from "@chakra-ui/react";
 import { GiFlowerPot } from "react-icons/gi";
+import {usePrefetchTreatments} from "@/components/treatments/hooks/useTreatments";
 
 import { BackgroundImage } from "@/components/common/BackgroundImage";
 
 export function Home() {
+    usePrefetchTreatments();
   return (
     <Stack textAlign="center" justify="center" height="84vh">
       <BackgroundImage />
