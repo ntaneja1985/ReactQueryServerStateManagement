@@ -1143,6 +1143,475 @@ const {data: appointments = fallback} = useQuery({
 - ![img_71.png](img_71.png)
 
 ## React Query and Authentication
+- ![img_72.png](img_72.png)
+- ![img_73.png](img_73.png)
+- ![img_74.png](img_74.png)
+- ![img_75.png](img_75.png)
+- ![img_76.png](img_76.png)
+```jsx
+//get details on the UserId
+const {userId, userToken} = useLoginData();
+
+// call useQuery to update user data from server
+//const user: User = null;
+const {data:user} = useQuery({
+    //queryFn will run only if enabled is true, if false then queryFn will not run
+    enabled: !!userId,
+    queryKey:generateUserKey(userId, userToken),
+    queryFn:()=>getUser(userId, userToken),
+    staleTime: Infinity
+});
+
+export const generateUserKey = (userId: number, userToken:string) => {
+    return [queryKeys.user,userId,userToken];
+}
+```
+### setQueryData and removeQueries
+```jsx
+// meant to be called from useAuth
+function updateUser(newUser: User): void {
+    // update the user in the query cache
+    queryClient.setQueryData(
+        generateUserKey(newUser.id, newUser.token),
+        newUser
+    )
+}
+
+// meant to be called from useAuth
+function clearUser() {
+    //reset user to null in query cache
+    queryClient.removeQueries(
+        {queryKey: [queryKeys.user]}
+    )
+}
+```
+- ![img_77.png](img_77.png)
+```jsx
+export function useUserAppointments(): Appointment[] {
+    const {userId, userToken} = useLoginData();
+
+    // replace with React Query
+    const fallback: Appointment[] = [];
+    const {data:userAppointments = fallback} = useQuery({
+        //queryFn will run only if enabled is true, if false then queryFn will not run
+        enabled: !!userId,
+        queryKey:generateUserAppointmentKey(userId, userToken),
+        queryFn:()=>getUserAppointments(userId, userToken),
+        staleTime: Infinity
+    });
+    return userAppointments;
+}
+
+
+function clearUser() {
+    //reset user to null in query cache
+    queryClient.removeQueries(
+        {queryKey: [queryKeys.user]}
+    );
+
+    //remove user appointments data
+    queryClient.removeQueries(
+        {queryKey: [queryKeys.appointments,queryKeys.user]}
+    )
+}
+```
+
+### Summary
+- ![img_78.png](img_78.png)
+
+## Mutations: Updating Data on the Server
+- Since server data updates, so we need to invalidate queries
+- We have concept of optimistic updates also
+- ![img_79.png](img_79.png)
+- We have useIsMutating which is similar to useIsFetching
+- We can show loading indicator on useIsMutating
+- ![img_80.png](img_80.png)
+```jsx
+import { toast } from "@/components/app/toast";
+import {MutationCache, QueryCache, QueryClient} from "@tanstack/react-query";
+
+function createTitle(errorMsg:string, actionType: "query" | "mutation")
+{
+    const action = actionType ==="query" ? "fetch":"update";
+    const title = `could not ${action} data: ${
+        errorMsg ?? "error connecting to server"
+    }`;
+
+    return title;
+}
+
+function errorHandler(title: string) {
+    // https://chakra-ui.com/docs/components/toast#preventing-duplicate-toast
+    // one message per page load, not one message per query
+    // the user doesn't care that there were three failed queries on the staff page
+    //    (staff, treatments, user)
+    const id = "react-query-toast";
+
+    if (!toast.isActive(id)) {
+
+        toast({ id, title, status: "error", variant: "subtle", isClosable: true });
+    }
+}
+
+
+export const queryClient = new QueryClient({
+    //Configure refetch options globally here
+    defaultOptions:{
+        queries:{
+            staleTime:600000, //10 minutes
+            gcTime: 900000, //15 minutes
+            refetchOnMount: false,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+        }
+    },
+
+    //Add the query cache for the global error handler
+    queryCache: new QueryCache({
+
+        onError: (error) => {
+            const title = createTitle(error.message,"query")
+            errorHandler(title);
+        },
+    }),
+    mutationCache: new MutationCache({
+        onError: (error) => {
+            const title = createTitle(error.message,"mutation")
+            errorHandler(title);
+        },
+    })
+});
+
+```
+- For the Loading indicators we will use useIsMutating hook
+```jsx
+import { Spinner, Text } from "@chakra-ui/react";
+import {useIsFetching, useIsMutating} from "@tanstack/react-query";
+
+export function Loading() {
+  // will use React Query `useIsFetching` to determine whether or not to display
+  const isFetching = useIsFetching(); // returns an integer, if > 0, then query calls are still pending, if 0, then it will give false
+  const isMutating = useIsMutating();
+  const display = isFetching || isMutating ? "inherit" : "none";
+
+  return (
+    <Spinner
+      thickness="4px"
+      speed="0.65s"
+      emptyColor="olive.200"
+      color="olive.800"
+      role="status"
+      position="fixed"
+      zIndex="9999"
+      top="50%"
+      left="50%"
+      transform="translate(-50%, -50%)"
+      display={display}
+    >
+      <Text display="none">Loading...</Text>
+    </Spinner>
+  );
+}
+```
+
+### Creating a custom mutation
+- We use useMutation hook to change data on the server
+- There is no cached data here
+- Also there are no retries unlike useQuery which has 3 retries
+- There is no refetch
+- There is no isLoading() or isFetching()
+- useMutation() returns mutate function which actually runs the mutation
+- onMutate() callback is also there(for optimistic queries!)
+```jsx
+// for when we need functions for useMutation
+async function setAppointmentUser(
+    appointment: Appointment,
+    userId: number | undefined,
+): Promise<void> {
+    if (!userId) return;
+    const patchOp = appointment.userId ? 'replace' : 'add';
+    const patchData = [{ op: patchOp, path: '/userId', value: userId }];
+    await axiosInstance.patch(`/appointment/${appointment.id}`, {
+        data: patchData,
+    });
+}
+
+export function useReserveAppointment() {
+    const { userId } = useLoginData();
+
+    const toast = useCustomToast();
+
+    // TODO: replace with mutate function
+    const {mutate} = useMutation({
+        //No mutation keys only the mutation function and the onSuccess and onError callback methods
+        mutationFn: (appointment:Appointment)=>setAppointmentUser(appointment,userId),
+        onSuccess: () => {
+            toast({title:"You have reserved an appointment!",status:"success"});
+        }
+    });
+
+    return mutate;
+}
+```
+- We can use it like this:
+```tsx
+const reserveAppointment = useReserveAppointment();
+if (clickable) {
+    onAppointmentClick = userId
+        ? () => reserveAppointment(appointmentData)
+        : undefined;
+    hoverCss = {
+        transform: "translateY(-1px)",
+        boxShadow: "md",
+        cursor: "pointer",
+    };
+}
+```
+
+### Invalidating Queries after Mutation
+- QueryClient has an invalidate query method which we can run on mutation
+- This is useful since we want to refetch latest data
+- We will invalidateQueries in the onSuccess callback of mutate function
+- ![img_81.png](img_81.png)
+
+### Query Filters
+- ![img_82.png](img_82.png)
+- We can invalidate queries by applying a queryFilter on it
+```tsx
+export function useReserveAppointment() {
+    const queryClient = useQueryClient();
+    const { userId } = useLoginData();
+
+    const toast = useCustomToast();
+
+    // TODO: replace with mutate function
+    const {mutate} = useMutation({
+        //No mutation keys only the mutation function and the onSuccess and onError callback methods
+        mutationFn: (appointment:Appointment)=>setAppointmentUser(appointment,userId),
+        onSuccess: () => {
+            //Only invalidate those queries which have a query key like appointments
+            queryClient.invalidateQueries({queryKey:[queryKeys.appointments]})
+            toast({title:"You have reserved an appointment!",status:"success"});
+        }
+    });
+
+    return mutate;
+}
+```
+
+### Mutation to cancel an appointment
+- ![img_83.png](img_83.png)
+```tsx
+export function useCancelAppointment() {
+    const toast = useCustomToast();
+    const queryClient = useQueryClient();
+
+    // TODO: replace with mutate function
+    const {mutate} = useMutation({
+        mutationFn: (appointment:Appointment)=> removeAppointmentUser(appointment),
+        onSuccess: () => {
+            queryClient.invalidateQueries({queryKey: [queryKeys.appointments]})
+            toast({title:"You have cancelled an appointment(done by Nishant)!",status:"warning"});
+        }
+    })
+
+    return mutate;
+}
+```
+### Updating User and Query Cache with Mutation Response
+- ![img_84.png](img_84.png)
+```tsx
+// for when we need a server function
+async function patchUserOnServer(
+    newData: User | null,
+    originalData: User | null,
+): Promise<User | null> {
+    if (!newData || !originalData) return null;
+    // create a patch for the difference between newData and originalData
+    const patch = jsonpatch.compare(originalData, newData);
+
+    // send patched data to the server
+    const { data } = await axiosInstance.patch(
+        `/user/${originalData.id}`,
+        { patch },
+        {
+            headers: getJWTHeader(originalData.token),
+        },
+    );
+    return data.user;
+}
+
+export function usePatchUser() {
+    const { user, updateUser } = useUser();
+
+    //replace with mutate function
+
+    const {mutate:patchUser} = useMutation({
+        //mutationKey:[MUTATION_KEY],
+        mutationFn: (newUser:User) => patchUserOnServer(newUser,user),
+        onSuccess: (userData:User | null) => {
+            toast({title:"User updated successfully!",status:"success"});
+            updateUser(userData);
+        }
+    })
+
+
+    return patchUser;
+}
+```
+- However updateUser has a problem, here is the code for updateUser
+```tsx
+function updateUser(newUser: User): void {
+    // update the user in the query cache
+    queryClient.setQueryData(
+        generateUserKey(newUser.id, newUser.token),
+        newUser
+    )
+}
+```
+- Note that when we are updating the queryCache using the setQueryData we are generating a key based on the userToken
+- This userToken might change with subsequent requests. This results in updated data not being reflected across the app
+- For this we will deliberately remove userToken from the generateUserKey() method
+```tsx
+export const generateUserKey = (userId: number, userToken:string) => {
+    // return [queryKeys.user,userId,userToken];
+    //Deliberately exclude the userToken from the dependency array
+    // to keep key consistent for userId regardless of token changes
+    return [queryKeys.user,userId];
+}
+
+```
+- This allows updated data for the user Profile to be displayed across the application
+
+### Introduction to Optimistic Updates in React Query
+- Slow down your network connection
+- Update the user again
+- Till the time, newData for the user is not reflected back from the server(which may take time), the screen keeps loading and we see stale data
+- We want a mechanism where we display the updated data instantly and then the server can be updated in the background
+- This results in a better user experience(Remember likes in Facebook, they are instantly updated)
+- For this React Query provides us with Optimistic Updates
+- ![img_85.png](img_85.png)
+- ![img_86.png](img_86.png)
+```tsx
+const mutation = useMutation({
+  mutationFn: addTodo,                 // async POST call
+  onMutate,                            // optimistic step
+  onError,                             // rollback
+  onSettled                            // final refetch / cache merge
+});
+
+```
+- onMutate: Runs before the mutation function fires. You cancel ongoing fetches, snapshot the previous cache, and do queryClient.setQueryData to insert the optimistic value.
+
+- onError: Receives the context you returned from onMutate. Restore the snapshot to undo the optimistic change.
+
+- onSettled / onSuccess: Whichever you choose, invalidate or merge queries so that the UI finally shows the real server data
+- Think of onMutate + onError as try/catch for your cache, and onSettled as the finally block
+```tsx
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+function useAddTodo() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: (text: string) => axios.post('/api/todos', { text }),
+    onMutate: async (text) => {
+      await qc.cancelQueries({ queryKey: ['todos'] });
+
+      const prev = qc.getQueryData<Todo[]>(['todos']);          // 1️⃣ snapshot
+      const optimisticTodo = { id: crypto.randomUUID(), text }; // 2️⃣ fake id
+      qc.setQueryData(['todos'], (old = []) => [...old, optimisticTodo]); // 3️⃣ update
+
+      return { prev };                                          // 4️⃣ context
+    },
+    onError: (_err, _vars, ctx) => {
+      qc.setQueryData(['todos'], ctx?.prev);                    // 5️⃣ rollback
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['todos'] });            // 6️⃣ refetch
+    },
+  });
+}
+
+```
+- Steps 1–3 happen instantly, so the UI shows the new todo in 0 ms
+- If the POST fails, step 5 restores the snapshot
+- Either way, step 6 ensures eventual consistency.
+- Rollback works because onMutate returns a context object that is later fed into both onError and onSettled. 
+- A common pattern is to store a function that performs the rollback so onError simply calls it
+
+### Using useMutationState
+- useMutationState lets you “look into” React-Query’s Mutation Cache from any component.
+- Typical reasons to do that are:
+- render the variables of every mutation that is still running (great for optimistic list items)
+- show a global progress bar whenever any mutation is pending
+- read the last returned data of a particular mutation chain
+- The hook takes an object with two optional keys:
+```tsx
+useMutationState({
+  filters?: MutationFilters   // which mutations do you care about?
+  select?:  (m) => T          // what part of each mutation do you want?
+}) => T[]
+
+```
+```tsx
+const hasPending = useMutationState({
+  filters: { status: 'pending' },
+  select : () => true,          // we only care if at least one exists
+}).length > 0
+
+return hasPending ? <FullScreenSpinner /> : null
+
+```
+- In the code we have the following code for usePatchUser hook
+```tsx
+export function usePatchUser() {
+    const { user, updateUser } = useUser();
+    const queryClient = useQueryClient();
+
+    //replace with mutate function
+
+    const {mutate:patchUser} = useMutation({
+        mutationKey:[MUTATION_KEY],
+        mutationFn: (newUser:User) => patchUserOnServer(newUser,user),
+        onSuccess: () => {
+            toast({title:"User updated successfully!",status:"success"});
+        },
+        onSettled: ()=>{
+            //return promise to maintain 'inProgress' status until query invalidation is complete
+            return queryClient.invalidateQueries({queryKey: [queryKeys.user]});
+        }
+    })
+
+
+    return patchUser;
+}
+```
+- Then inside the UserProfile.tsx we have:
+```tsx
+const pendingData = useMutationState({
+    filters: {mutationKey:[MUTATION_KEY],status: "pending"},
+    select: (mutation) => {
+        return mutation.state.variables as User;
+    }
+});
+
+//take the first item in the pendingData array
+//we know there will be only one mutation that matches the filter
+const pendingUser = pendingData ? pendingData[0] : null;
+
+//Optimistic Update here, we show the pendingUser if that is true or else we show the user fetched from the server
+<Stack textAlign="center">
+    <Heading>Information for {pendingUser ? pendingUser.name : user?.name}</Heading>
+</Stack>
+```
+
+### Summary
+- ![img_87.png](img_87.png)
+
+## Testing in React-Query
+
+
 
 
 
