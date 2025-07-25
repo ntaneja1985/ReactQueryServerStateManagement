@@ -1610,8 +1610,580 @@ const pendingUser = pendingData ? pendingData[0] : null;
 - ![img_87.png](img_87.png)
 
 ## Testing in React-Query
+- ![img_88.png](img_88.png)
+- We will use vitest
+- vitest is faster than jest
+- We also need to install react testing library to render components for testing
+- setupTests.js runs before every test
+- ![img_89.png](img_89.png)
+- We can also install eslint plugins for testing
+- ![img_90.png](img_90.png)
+- We need to mock network calls between react query and server
+- We will use a Mock Service Worker
+- ![img_91.png](img_91.png)
+- ![img_92.png](img_92.png)
+- We have a handlers.js file which provide what kind of response to return for which service requests
+```js
+import { http, HttpResponse } from "msw";
+
+import {
+  mockAppointments,
+  mockStaff,
+  mockTreatments,
+  mockUserAppointments,
+} from "./mockData";
+
+export const handlers = [
+  http.get("http://localhost:3030/treatments", () => {
+    return HttpResponse.json(mockTreatments);
+  }),
+  http.get("http://localhost:3030/staff", () => {
+    return HttpResponse.json(mockStaff);
+  }),
+  http.get("http://localhost:3030/appointments/:year/:month", () => {
+    return HttpResponse.json(mockAppointments);
+  }),
+  http.get("http://localhost:3030/user/:id/appointments", () => {
+    return HttpResponse.json({ appointments: mockUserAppointments });
+  }),
+  http.patch("http://localhost:3030/appointment/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+];
+```
+- Mocked Data will look something like this:
+```js
+/** TREATMENTS ************************************************************************* */
+export const mockTreatments = [
+  {
+    id: 1,
+    name: 'Massage',
+    durationInMinutes: 60,
+    image: {
+      fileName: 'massage.jpg',
+      authorName: 'Mariolh',
+      authorLink:
+        'https://pixabay.com/users/mariolh-62451/?utm_source=link-attribution&amp;utm_medium=referral&amp;utm_campaign=image&amp;utm_content=567021',
+      platformName: 'Pixabay',
+      platformLink:
+        'https://pixabay.com/?utm_source=link-attribution&amp;utm_medium=referral&amp;utm_campaign=image&amp;utm_content=567021',
+    },
+    description:
+      'Restore your sense of peace and ease with a relaxing massage.',
+  },
+  {
+    id: 2,
+    name: 'Facial',
+    durationInMinutes: 30,
+    image: {
+      fileName: 'facial.jpg',
+      authorName: 'engin akyurt',
+      authorLink:
+        'https://unsplash.com/@enginakyurt?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText',
+      platformName: 'Unsplash',
+      platformLink: 'https://unsplash.com/',
+    },
+    description: 'Give your face a healthy glow with this cleansing treatment.',
+  },
+  {
+    id: 3,
+    name: 'Scrub',
+    durationInMinutes: 15,
+    image: {
+      fileName: 'scrub.jpg',
+      authorName: 'Monfocus',
+      authorLink:
+        'https://pixabay.com/users/monfocus-2516394/?utm_source=link-attribution&amp;utm_medium=referral&amp;utm_campaign=image&amp;utm_content=5475880',
+      platformName: 'Pixabay',
+      platformLink:
+        'https://pixabay.com/?utm_source=link-attribution&amp;utm_medium=referral&amp;utm_campaign=image&amp;utm_content=5475880',
+    },
+    description:
+      'Invigorate your body and spirit with a scented Himalayan salt scrub.',
+  },
+];
+```
+
+### Query Client and Query Provider in Tests
+- We need to create a function to wrap in a Query Provider before rendering
+- Query provider needs query client.
+- Each test gets its own instance of query client for isolation
+- We will generate query client with a function
+- It will help us when we want to set up defaults
+- It will also allow us to override with a "special" client if needed for a particular test
+- We have the following code in test-utils/index.tsx file
+```js
+import { ChakraProvider } from "@chakra-ui/react";
+import { render as RtlRender } from "@testing-library/react";
+import { PropsWithChildren, ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+
+// ** FOR TESTING CUSTOM HOOKS ** //
+// from https://tkdodo.eu/blog/testing-react-query#for-custom-hooks
+// export const createQueryClientWrapper = () => {
+//   const queryClient = generateQueryClient();
+//   return ({ children }: PropsWithChildren) => (
+//     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+//   );
+// };
+
+// reference: https://testing-library.com/docs/react-testing-library/setup#custom-render
+function customRender(ui: ReactElement) {
+  return RtlRender(
+    <ChakraProvider>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </ChakraProvider>
+  );
+}
+
+// re-export everything
+// eslint-disable-next-line react-refresh/only-export-components
+export * from "@testing-library/react";
+
+// override render method
+export { customRender as render };
+
+```
+- The customRender function wraps your test components in the necessary provider context that your application components expect during runtime. 
+- Without these providers, your tests would fail because components can't access the required context.
+- ![img_93.png](img_93.png)
+- The commented createQueryClientWrapper function shows the missing piece for React Query testing:
+```ts
+// export const createQueryClientWrapper = () => {
+//   const queryClient = generateQueryClient();
+//   return ({ children }: PropsWithChildren) => (
+//     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+//   );
+// };
+
+```
+- This would be critical for testing React Query hooks and components because:
+- QueryClientProvider supplies the query client context that React Query hooks depend on
+- Each test gets a fresh query client, preventing test interference
+- Allows testing of data fetching, caching, and mutation behaviors
+- When you uncomment and implement the QueryClientProvider wrapper, your tests can:
+- Test custom hooks that use useQuery, useMutation, etc.
+- Mock API responses and test loading/error states
+- Test cache behavior and data synchronization
+- Isolate tests with fresh query clients
+- Test optimistic updates and query invalidation
+- Without this setup, any component or hook using React Query would fail in tests with context-related errors, making comprehensive testing impossible.
+- Setup a query client in the custom render function as follows:
+```ts
+// make a function to generate a unique query client for each test
+const generateQueryClient = () =>{
+    return new QueryClient();
+}
+
+// reference: https://testing-library.com/docs/react-testing-library/setup#custom-render
+function customRender(ui: ReactElement, client?:QueryClient) {
+    const queryClient = client ?? generateQueryClient();
+    return RtlRender(
+        <ChakraProvider>
+            <QueryClientProvider client={queryClient}>
+            <MemoryRouter>{ui}</MemoryRouter>
+            </QueryClientProvider>
+            </ChakraProvider>
+    );
+}
+
+// Now we can call this inside our tests method
+import { render, screen } from "@/test-utils";
+
+import { Treatments } from "../Treatments";
+
+test("renders response from query", () => {
+    render(<Treatments/>)
+});
+
+```
+# React Query Testing with MSW Integration
+
+## Overview
+
+This guide explains how a complete integration test works when combining **React Query**, **MSW (Mock Service Worker)**, and **React Testing Library** to test data fetching and rendering in React components.
+
+## Test Example
+
+```typescript
+import { render, screen } from "@/test-utils";
+import { Treatments } from "../Treatments";
+import { expect } from "vitest";
+
+test("renders response from query", async () => {
+  render(<Treatments/>)
+
+  const treatmentTitles = await screen.findAllByRole("heading",
+      { name: /massage|facial|scrub/i });
+
+  expect(treatmentTitles).toHaveLength(3);
+});
+```
 
 
+## How It Works
+
+### 1. Component Rendering with Full Context
+
+```typescript
+render(<Treatments/>)
+```
+
+Your custom `render` function from `test-utils` wraps the `<Treatments/>` component with:
+
+- **ChakraProvider** (for UI styling)
+- **QueryClientProvider** (for React Query)
+- **MemoryRouter** (for routing)
+
+
+### 2. React Query Hook Execution
+
+When `<Treatments/>` renders, it contains a hook like:
+
+```typescript
+// Inside Treatments component
+const { data: treatments } = useQuery({
+  queryKey: ['treatments'],
+  queryFn: () => fetch('http://localhost:3030/treatments').then(res => res.json())
+});
+```
+
+
+### 3. MSW Intercepts the HTTP Request
+
+Instead of making a real network call, your MSW handler intercepts:
+
+```javascript
+http.get("http://localhost:3030/treatments", () => {
+  return HttpResponse.json(mockTreatments); // Returns your 3 mock treatments
+});
+```
+
+
+### 4. Async DOM Query with findAllByRole
+
+```typescript
+const treatmentTitles = await screen.findAllByRole("heading",
+    { name: /massage|facial|scrub/i });
+```
+
+This line performs several important operations:
+
+- **`findAllByRole("heading")`** - Looks for HTML heading elements (`<h1>`, `<h2>`, etc.)
+- **`name: /massage|facial|scrub/i`** - Filters headings containing "massage", "facial", or "scrub" (case-insensitive)
+- **`await`** - Waits for React Query to complete the async data fetch and re-render
+- **Returns array** of matching DOM elements
+
+
+### 5. Data Flow Verification
+
+```typescript
+expect(treatmentTitles).toHaveLength(3);
+```
+
+Your mock data contains exactly 3 treatments:
+
+```javascript
+export const mockTreatments = [
+  { id: 1, name: 'Massage', ... },
+  { id: 2, name: 'Facial', ... },
+  { id: 3, name: 'Scrub', ... },
+];
+```
+
+
+## Why This Test Is Powerful
+
+### Integration Testing
+
+- Tests the **entire data flow**: Component → React Query → MSW → Mock Data → DOM
+- Validates that your component correctly renders the fetched data
+- Ensures React Query integration works properly
+
+
+### Async Handling
+
+- **`findAllByRole`** automatically waits for the component to re-render after data loads
+- No need for manual `waitFor` or `act` calls
+- Handles React Query's loading → success state transition
+
+
+### Realistic Testing
+
+- Component makes actual HTTP requests (intercepted by MSW)
+- Tests real user-facing behavior (what headings appear)
+- Validates accessibility (using ARIA roles)
+
+
+## Execution Flow
+
+1. **Initial Render**: Component shows loading state
+2. **Query Execution**: React Query makes HTTP request
+3. **MSW Response**: Handler returns mock data immediately
+4. **Re-render**: Component updates with treatment data
+5. **DOM Update**: Heading elements appear with treatment names
+6. **Test Assertion**: `findAllByRole` locates all 3 headings and passes the length check
+
+## Benefits
+
+This test pattern ensures your **entire data fetching and rendering pipeline** works correctly, making it much more valuable than testing components or hooks in isolation. It provides confidence that:
+
+- ✅ API integration works
+- ✅ Data transforms correctly
+- ✅ UI renders as expected
+- ✅ Accessibility is maintained
+- ✅ Async operations handle properly
+
+## Testing for AllStaff
+- ![img_94.png](img_94.png)
+```ts
+import { AllStaff } from "../AllStaff";
+import { render, screen } from "@/test-utils";
+import {expect} from "vitest";
+
+test("renders response from query", async () => {
+    render(<AllStaff/>)
+
+    const staffTitles = await screen.findAllByRole("heading",
+        { name: /sandra|divya|mateo|michael/i,
+        });
+
+    expect(staffTitles).toHaveLength(4);
+});
+
+```
+### Testing React-Query Errors
+- We usually display React Query errors in a popup.
+- So we write the following test:
+```ts
+import { AllStaff } from "../AllStaff";
+
+import { http, HttpResponse } from "msw";
+import { server } from '@/mocks/server';
+import {render, screen} from "@/test-utils";
+import {expect} from "vitest";
+
+test("handles query error", async () => {
+  //(re)set handler to return a 500 error for staff and treatments
+  server.use(
+  http.get("http://localhost:3030/staff", () => {
+    return new HttpResponse(null, { status: 500 });
+  }),
+  http.get("http://localhost:3030/treatments", () => {
+    return new HttpResponse(null, { status: 500 });
+  })
+  );
+
+  render(<AllStaff />);
+
+  const alertToast = await screen.findByRole("status");
+  expect(alertToast).toHaveTextContent(/could not fetch data/i)
+});
+
+```
+- Now this test will initially fail.
+- This is because it is being passed a queryClient that doesnot have any onError options
+- For this we will go back to the original queryClient we were using and export its queryClientOptions
+```ts
+export const queryClientOptions: QueryClientConfig = {
+    //Configure refetch options globally here
+    defaultOptions:{
+        queries:{
+            staleTime:600000, //10 minutes
+            gcTime: 900000, //15 minutes
+            refetchOnMount: false,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+        }
+    },
+
+    //Add the query cache for the global error handler
+    queryCache: new QueryCache({
+
+        onError: (error) => {
+            const title = createTitle(error.message,"query")
+            errorHandler(title);
+        },
+    }),
+    mutationCache: new MutationCache({
+        onError: (error) => {
+            const title = createTitle(error.message,"mutation")
+            errorHandler(title);
+        },
+    })
+}
+
+export const queryClient = new QueryClient(queryClientOptions);
+
+
+function errorHandler(title: string) {
+    // https://chakra-ui.com/docs/components/toast#preventing-duplicate-toast
+    // one message per page load, not one message per query
+    // the user doesn't care that there were three failed queries on the staff page
+    //    (staff, treatments, user)
+    const id = "react-query-toast";
+
+    if (!toast.isActive(id)) {
+
+        toast({ id, title, status: "error", variant: "subtle", isClosable: true });
+    }
+}
+```
+- Note that the error itself is displayed in an element with name: "status"
+- Also note that we have cast the queryClientOptions as a QueryClientConfig so that we can manipulate it later
+- Now we will import this queryClientOptions into the new queryClient instance we are creating for testing
+- We will also disable retries on this so that our test gets access to the "status" element immediately after error
+```ts
+// make a function to generate a unique query client for each test
+const generateQueryClient = () =>{
+    queryClientOptions.defaultOptions.queries.retry = false;
+    return new QueryClient(queryClientOptions);
+}
+```
+- Now if we re-run our test it runs fine and the test passes
+
+### Testing mutations
+- ![img_95.png](img_95.png)
+- We will mimic a user login
+- ![img_96.png](img_96.png)
+- In setupTests.js we will mimic the useLoginData
+```ts
+// mock useLoginData to mimic a logged-in user
+vi.mock("./auth/AuthContext", () => ({
+  __esModule: true,
+  // for the hook return value
+  useLoginData: () => ({ userId: 1 }),
+  // for the provider default export
+  default: ({ children }) => children,
+}));
+```
+- We will use the fireEvent function provided by React-Testing-Library
+```ts
+import { Calendar } from "../Calendar";
+
+import {
+  fireEvent,
+  render,
+  screen,
+  waitForElementToBeRemoved,
+} from "@/test-utils";
+
+test("Reserve appointment", async () => {
+  // TODO: render the calendar
+    render(<Calendar/>)
+  // find all the appointment buttons
+  const appointments = await screen.findAllByRole("button", {
+    name: /\d\d? [ap]m\s+(scrub|facial|massage)/i,
+  });
+
+  // click on the first one to reserve
+  fireEvent.click(appointments[0]);
+
+  // check for the toast alert
+  const alertToast = await screen.findByRole("status");
+  expect(alertToast).toHaveTextContent("reserve");
+
+  // close alert to keep state clean and wait for it to disappear
+  const alertCloseButton = screen.getByRole("button", { name: "Close" });
+  fireEvent.click(alertCloseButton);
+  await waitForElementToBeRemoved(alertToast);
+});
+```
+### Introduction to Testing Custom Hooks
+- ![img_97.png](img_97.png)
+- ![img_98.png](img_98.png)
+- We can create queryClientWrapper as follows:
+```ts
+export const createQueryClientWrapper = () => {
+    const queryClient = generateQueryClient();
+    return ({ children }: PropsWithChildren) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+};
+```
+- Now we can test useAppointments as follows:
+```ts
+import { act, renderHook, waitFor } from "@testing-library/react";
+
+import { useAppointments } from "../hooks/useAppointments";
+import { AppointmentDateMap } from "../types";
+
+import { createQueryClientWrapper } from "@/test-utils";
+import {Appointment} from "@shared/types";
+
+
+//a helper function to get the total number of appointments from an Appointment Date
+const getAppointmentCount = (appointments:AppointmentDateMap) => {
+    return Object.values(appointments).reduce(
+        (runningCount,appointmentsOnDate)=>
+            runningCount + appointmentsOnDate.length,0
+    );
+}
+
+test("filter appointments by availability", async () => {
+  const {result} = renderHook(()=> useAppointments(),
+      {wrapper: createQueryClientWrapper()});
+    //This will show the return value of the useAppointments hook
+    console.log(result);
+
+    // wait for appointments to populate
+    await waitFor(()=>
+        expect(getAppointmentCount(result.current.appointments))
+            .toBeGreaterThan(0) )
+
+    // appointments start out filtered(show only available)
+    const filteredAppointmentsCount =  getAppointmentCount(
+        result.current.appointments);
+
+    // Run the setShowAll function and set it to true, to get all appointments
+    act(()=> result.current.setShowAll(true))
+
+    //wait for count of current appointments after setShowAll=true to be greater than filteredAppointmentsCount
+    await waitFor(()=>
+        expect(getAppointmentCount(result.current.appointments))
+            .toBeGreaterThan(filteredAppointmentsCount))
+});
+
+```
+### Test Staff Filtering
+- ![img_99.png](img_99.png)
+```ts
+import { act, renderHook, waitFor } from "@testing-library/react";
+
+import { useStaff } from "../hooks/useStaff";
+import type { Staff } from "@shared/types";
+
+import { createQueryClientWrapper } from "@/test-utils";
+import {AppointmentDateMap} from "@/components/appointments/types";
+
+
+
+test("filter staff", async () => {
+    const {result} = renderHook(()=> useStaff(),
+        {wrapper: createQueryClientWrapper()});
+    //This will show the return value of the useAppointments hook
+    console.log(result);
+
+    // wait for appointments to populate
+    await waitFor(()=>
+        expect(result.current.staff.length)
+            .toBeGreaterThan(0) )
+
+    // get current Staff Length
+    const allStaffLength =  result.current.staff.length;
+
+    //update the filter state
+    act(()=> result.current.setFilter("facial"))
+
+    await waitFor(()=>
+        expect(result.current.staff.length)
+            .toBeLessThan(allStaffLength))
+});
+
+```
+
+### Summary
+- ![img_100.png](img_100.png)
 
 
 

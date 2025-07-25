@@ -1,5 +1,5 @@
 import { toast } from "@/components/app/toast";
-import {MutationCache, QueryCache, QueryClient} from "@tanstack/react-query";
+import {MutationCache, QueryCache, QueryClient, QueryClientConfig} from "@tanstack/react-query";
 
 function createTitle(errorMsg:string, actionType: "query" | "mutation")
 {
@@ -24,8 +24,7 @@ function errorHandler(title: string) {
   }
 }
 
-
-export const queryClient = new QueryClient({
+export const queryClientOptions: QueryClientConfig = {
     //Configure refetch options globally here
     defaultOptions:{
         queries:{
@@ -51,4 +50,6 @@ export const queryClient = new QueryClient({
             errorHandler(title);
         },
     })
-});
+}
+
+export const queryClient = new QueryClient(queryClientOptions);
